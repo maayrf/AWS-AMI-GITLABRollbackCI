@@ -1,5 +1,6 @@
 # AWS-AMI-GITLABRollbackCI
-Fazer rollback manualmente via Postman de uma determinada versão de AWS EC2 AMI, sem que essa versão passe pelo stage de build novamente.
+### Fazer rollback manualmente via Postman de uma determinada versão de AWS AMI, sem que essa versão passe pelo stage de build novamente.
+### As configurações de rollback se encontram no .gitlab-ci.yml (stages: build, deploy e rollback).
 .
 .
 .
