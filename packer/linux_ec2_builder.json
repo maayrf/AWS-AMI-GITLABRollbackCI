@@ -1,0 +1,111 @@
+{
+  "variables": {
+    "aws_region": "us-west-2",
+    "project_name": "",
+    "project_tag": "master",
+    "project_url": "",
+    "node_version": "",
+    "environment": "testing"
+  },
+  "builders": [{
+    "type": "amazon-ebs",
+    "region": "{{user `aws_region`}}",
+    "source_ami_filter": {
+      "filters": {
+        "virtualization-type": "hvm",
+        "name": "amazonlinux2/base/nivel1/*",
+        "root-device-type": "ebs",
+        "tag:deploy": "yes"
+      },
+      "owners": ["XXXXXXXXXX"],
+      "most_recent": true
+    },
+    "instance_type": "c5.large",
+    "vpc_id": "vpc-XXXXXXXX",
+    "subnet_id": "subnet-XXXXXXXXXXX",
+    "ssh_username": "ec2-user",    
+    "ami_name": "amazonlinux2/services/{{user `project_name`}}/{{timestamp}}",
+    "ami_description": "AMI que sera utilizada no projeto {{user `project_name`}}, versao {{user `project_tag`}} para deploy e autoscaling.",
+    "ebs_optimized": true,
+    "ena_support": true,
+    "iam_instance_profile": "packer-builder-testing",
+    "run_tags" : {
+      "Name": "Packer_{{ user `project_name` }}"
+    },
+    "tags": {
+      "app_version": "{{ user `project_tag` }}",
+      "app_name": "{{ user `project_name` }}"
+    }
+  }],
+  "provisioners": [
+    {
+      "type": "shell",
+      "inline": [
+        "echo 'export AWS_REGION={{ user `aws_region` }}' | sudo tee /etc/profile.d/vars.sh",
+        "echo 'export PROJECT_NAME={{ user `project_name` }}' | sudo tee -a /etc/profile.d/vars.sh",
+        "echo 'export NODE_VERSION={{ user `node_version` }}' | sudo tee -a /etc/profile.d/vars.sh",
+        "echo 'export PROJECT_URL={{ user `project_url` }}' | sudo tee -a /etc/profile.d/vars.sh",
+        "echo 'export ENVIRONMENT={{ user `environment` }}' | sudo tee -a /etc/profile.d/vars.sh",
+        "echo 'export PROJECT_VERSION={{ user `project_tag` }}' | sudo tee -a /etc/profile.d/vars.sh"
+      ]
+    },
+    {
+      "destination": "/tmp/iptables-rules.txt",
+      "source": "./configs/iptables-sysconfig.txt",
+      "type": "file"
+    },
+    {
+      "type": "shell",
+      "inline": [        
+        "sudo mv /tmp/iptables-rules.txt /etc/sysconfig/iptables",
+        "sudo chmod 600 /etc/sysconfig/iptables",
+        "sudo chown root:root /etc/sysconfig/iptables"
+      ]
+    },
+    {
+      "destination": "/tmp/kinesis_agent.json",
+      "source": "./configs/kinesis_agent.json",
+      "type": "file"
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "sudo mv /tmp/kinesis_agent.json /etc/aws-kinesis/agent.json",
+        "sudo rm -rf /tmp/kinesis_agent.json",
+        "sudo chmod 750 -R /etc/aws-kinesis/",
+        "sudo chown aws-kinesis-agent-user:aws-kinesis-agent-user -R /etc/aws-kinesis/",
+        "sudo sed -i \"s/VAR_REGION/${AWS_REGION}/\" /etc/aws-kinesis/agent.json",
+        "sudo sed -i \"s/VAR_PROJECT_NAME/${PROJECT_NAME}/\" /etc/aws-kinesis/agent.json"
+      ]
+    },
+    {
+      "type": "file",
+      "destination": "/tmp/nginx-vhosts.conf",
+      "source": "./configs/nginx-vhosts.conf"
+    },
+    {
+      "type": "file",
+      "destination": "/tmp/nginx.conf",
+      "source": "./configs/nginx.conf"
+    },
+    {
+      "type": "shell",
+      "scripts": [
+        "./configs/bootstrap-nginx.sh",
+        "./configs/bootstrap-users.sh",
+        "./configs/bootstrap-projeto.sh"
+      ]
+    },
+    {
+      "type": "shell",
+      "inline": [
+        "sudo setsebool -P httpd_setrlimit 1",
+        "sudo nginx -t -c /etc/nginx/nginx.conf",
+        "sudo systemctl start nginx",
+        "sudo systemctl enable nginx",
+        "sudo chown root:log_reader /var/log/nginx",
+        "sudo chmod g+rx /var/log/nginx"
+      ]
+    }
+  ]
+}
