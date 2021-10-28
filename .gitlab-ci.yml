@@ -1,0 +1,66 @@
+image: alpine
+
+stages:
+  - build
+  - deploy
+  - rollback
+
+variables:
+  PROJECT_NAME: "adm"
+  PROJECT_URL: "https://gitlab+deploy-token-**********.git"
+  NODE_VERSION: "v14"
+  GIT_SSL_NO_VERIFY: "true"
+
+before_script:
+  - apk update && apk add --update grep bash zip py-pip git openssh curl && rm -rf /var/cache/apk/*
+  - pip install --upgrade pip
+  - pip install -Iv urllib3==1.22 --user
+  - mkdir ~/.aws/
+  - ROLENAME=`curl -s http://[IP]/latest/meta-data/iam/security-credentials/`
+  - AWS_ACCESS_KEY=`curl -s http://[IP]/latest/meta-data/iam/security-credentials/${ROLENAME} | grep AccessKeyId | awk -F'"' '{print $4}'`
+  - AWS_SECRET_KEY=`curl -s http://[IP]/latest/meta-data/iam/security-credentials/${ROLENAME} | grep SecretAccessKey | awk -F'"' '{print $4}'`
+  - TOKEN=`curl -s http://[IP]/latest/meta-data/iam/security-credentials/${ROLENAME} | grep Token | awk -F'"' '{print $4}'`
+  - echo -e "[default]\naws_access_key_id = $AWS_ACCESS_KEY\naws_secret_access_key = $AWS_SECRET_KEY\naws_session_token = $TOKEN" > ~/.aws/credentials
+
+build:
+  stage: build
+  environment: production
+  script:
+    - wget https://releases.hashicorp.com/packer/1.5.1/packer_1.5.1_linux_amd64.zip && unzip -d /usr/bin packer_1.5.1_linux_amd64.zip
+    - cd packer
+    - packer build -machine-readable -var "node_version=${NODE_VERSION}" -var "project_name=${PROJECT_NAME}" -var "project_tag=${VERSAO_APP}" -var "project_url=${PROJECT_URL}" linux_ec2_builder.json | tee ami_build.log
+    - grep 'artifact,0,id' ami_build.log | awk -F':' '{print $2}' | tr -d '\n' > ami_id.txt
+  resource_group: rg-build
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $rollback == null
+      when: always
+  artifacts:
+    paths:
+      - packer/ami_id.txt
+
+deploy:
+  stage: deploy
+  environment: production
+  script:
+    - wget https://releases.hashicorp.com/terraform/0.12.24/terraform_0.12.24_linux_amd64.zip && unzip terraform_0.12.24_linux_amd64.zip -d /tmp && mv /tmp/terraform /usr/bin
+    - SOURCE_AMI_ID=`cat packer/ami_id.txt`
+    - cd terraform
+    - terraform init
+    - terraform apply -auto-approve -var="nome_projeto=${PROJECT_NAME}" -var="versao_projeto=${VERSAO_APP}" -var="source_ami=${SOURCE_AMI_ID}"
+  resource_group: rg-deploy
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $rollback == null
+      when: on_success
+
+rollback:
+  stage: rollback
+  environment: production
+  script:
+    - wget https://releases.hashicorp.com/terraform/0.12.24/terraform_0.12.24_linux_amd64.zip && unzip terraform_0.12.24_linux_amd64.zip -d /tmp && mv /tmp/terraform /usr/bin
+    - cd terraform
+    - terraform init
+    - terraform apply -auto-approve -var="nome_projeto=${PROJECT_NAME}" -var="versao_projeto=${VERSAO_APP}"
+  resource_group: rg-deploy
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "trigger" && $rollback == "true"
+      when: always
