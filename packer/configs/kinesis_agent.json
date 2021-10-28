@@ -1,0 +1,15 @@
+{
+    "cloudwatch.emitMetrics": true,
+    "cloudwatch.endpoint": "monitoring.VAR_REGION.amazonaws.com",
+    "firehose.endpoint": "firehose.VAR_REGION.amazonaws.com",
+    "flows": [
+        {
+            "filePattern": "/var/log/nginx/*access.log*",
+            "deliveryStream": "VAR_PROJECT_NAME_app_logs"
+        },
+        {
+            "filePattern": "/var/log/audit/audit.log*",
+            "deliveryStream": "VAR_PROJECT_NAME_audit_logs"
+        }
+    ]
+}
